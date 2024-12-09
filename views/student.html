@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Student Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+</head>
+<body class="container py-5">
+  <div class="d-flex justify-content-center mb-4" id="logoContainer"></div>
+  <h2 class="text-center mb-4" id="pageTitle"></h2>
+  <p id="studentIdDisplay" class="text-center mb-4" style="font-weight: bold;"></p>
+
+  <!-- Available Courses Section -->
+  <div class="mb-5">
+    <h3>Available Courses</h3>
+    <p>Select a course below and click "Add Me to Course" to enroll.</p>
+    <div class="mb-3">
+      <label for="availableCourses" class="form-label">Available Courses</label>
+      <select class="form-select" id="availableCourses">
+        <option selected value="">No Available Courses</option>
+      </select>
+    </div>
+    <button type="button" class="btn btn-secondary" id="addSelfToCourseBtn" disabled>Add Me to Course</button>
+  </div>
+
+  <!-- Enrolled Courses Section -->
+  <div class="mb-5">
+    <h3>Your Courses</h3>
+    <p>Select one of your enrolled courses to view and add logs.</p>
+    <div class="mb-3">
+      <label for="course" class="form-label">Select Course</label>
+      <select class="form-select" id="course">
+        <option selected value="">Choose a Course</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Logs Section -->
+  <div class="mb-5" id="logsSection" style="display: none;">
+    <h3>Your Logs for the Selected Course</h3>
+    <h4 class="mt-4" id="logsHeader" style="display: none;">Logs</h4>
+    <ul data-cy="logs" class="list-group mt-3" style="display: none"></ul>
+
+    <div id="newLogContainer" class="mt-3" style="display: none">
+      <label for="logTextarea" class="form-label">New Log</label>
+      <textarea class="form-control" id="logTextarea" rows="3"></textarea>
+      <button type="button" class="btn btn-primary mt-3" id="addLogBtn" disabled>Add Log</button>
+    </div>
+  </div>
+
+  <p class="mt-5 text-center"><a href="/auth/logout">Logout</a></p>
+
+  <script>
+    const tenant = window.location.pathname.includes('/uvu/') ? 'UVU' : 'UofU';
+    const logoContainer = document.getElementById('logoContainer');
+    const pageTitle = document.getElementById('pageTitle');
+
+    let userNumericId = null;
+
+    if (tenant === 'UVU') {
+      logoContainer.innerHTML = `<img src="https://www.cdnlogo.com/logos/u/35/utah-valley-university.svg" width="200" class="img-fluid" alt="UVU Logo"/>`;
+      pageTitle.textContent = "UVU Student Portal";
+    } else {
+      logoContainer.innerHTML = `<img src="https://i.pinimg.com/originals/7a/fd/0d/7afd0da75e5b7c4a56dea47ca0a6d98e.png" width="200" class="img-fluid" alt="UofU Logo"/>`;
+      pageTitle.textContent = "UofU Student Portal";
+    }
+
+    const courseSelect = $('#course');
+    const availableCoursesSelect = $('#availableCourses');
+    const logsContainer = $('ul[data-cy="logs"]');
+    const logsHeader = $('#logsHeader');
+    const newLogContainer = $('#newLogContainer');
+    const logTextarea = $('#logTextarea');
+    const addLogBtn = $('#addLogBtn');
+    const addSelfToCourseBtn = $('#addSelfToCourseBtn');
+    const logsSection = $('#logsSection');
+    const studentIdDisplay = $('#studentIdDisplay');
+
+    // Fetch user info
+    $.get('/api/me', user => {
+      userNumericId = user.numericId;
+      studentIdDisplay.text('Your Student ID: ' + userNumericId);
+      loadAllCourses();
+      loadEnrolledCourses();
+    }).fail(() => {
+      alert('Please log in again.');
+      window.location = '/auth/login';
+    });
+
+    function loadAllCourses() {
+      // Fetch all courses for the tenant
+      $.get('/api/all-courses', (allCourses) => {
+        window.allCourses = allCourses;
+        updateAvailableCourses();
+      });
+    }
+
+    function loadEnrolledCourses() {
+      $.get('/api/courses', (courses) => {
+        window.enrolledCourses = courses;
+        updateEnrolledCourses();
+        updateAvailableCourses();
+      }).fail(err => {
+        console.error('Failed to load enrolled courses:', err);
+      });
+    }
+
+    function updateEnrolledCourses() {
+      courseSelect.empty();
+      courseSelect.append('<option value="" selected disabled>Select a course</option>');
+      if (window.enrolledCourses && window.enrolledCourses.length > 0) {
+        window.enrolledCourses.forEach(c => {
+          courseSelect.append(`<option value="${c._id}">${c.display}</option>`);
+        });
+      }
+    }
+
+    function updateAvailableCourses() {
+      if (!window.allCourses || !window.enrolledCourses) return; // Wait until both loaded
+
+      const enrolledIds = new Set(window.enrolledCourses.map(c => c._id));
+      const available = window.allCourses.filter(c => !enrolledIds.has(c._id));
+
+      availableCoursesSelect.empty();
+      if (available.length > 0) {
+        availableCoursesSelect.append('<option value="" selected disabled>Select a course to enroll</option>');
+        available.forEach(c => {
+          availableCoursesSelect.append(`<option value="${c._id}">${c.display}</option>`);
+        });
+      } else {
+        availableCoursesSelect.append('<option value="">No Available Courses</option>');
+      }
+
+      updateAddSelfButtonState();
+    }
+
+    availableCoursesSelect.on('change', updateAddSelfButtonState);
+
+    function updateAddSelfButtonState() {
+      const selectedCourseId = availableCoursesSelect.val();
+      addSelfToCourseBtn.prop('disabled', !selectedCourseId);
+    }
+
+    addSelfToCourseBtn.on('click', function() {
+      const courseId = availableCoursesSelect.val();
+      if (!courseId) return;
+      $.post(`/api/courses/${courseId}/add-student`, { studentId: userNumericId }, (res) => {
+        alert(res);
+        // After adding, reload enrolled and available
+        loadEnrolledCourses();
+      }).fail(err => {
+        console.error('Failed to add student to course:', err);
+        alert('Error adding yourself to the course');
+      });
+    });
+
+    courseSelect.on('change', function() {
+      const courseId = $(this).val();
+      if (courseId) {
+        fetchLogs(courseId);
+      } else {
+        logsSection.hide();
+      }
+    });
+
+    function fetchLogs(courseId) {
+      $.get(`/api/logs?courseId=${courseId}`, logs => {
+        const userLogs = logs.filter(l => l.uvuId === userNumericId);
+        logsContainer.empty();
+        logsHeader.show();
+        logsContainer.show();
+
+        if (userLogs.length > 0) {
+          userLogs.forEach(log => {
+            const item = $('<li>').addClass('list-group-item').html(`
+              <div><p>${log.text}</p><small class="text-muted">${new Date(log.date).toLocaleString()}</small></div>
+            `).on('click', function() { $(this).find('p').toggle(); });
+            logsContainer.append(item);
+          });
+        } else {
+          logsContainer.html('<li class="list-group-item">No logs found. You can add a new log below.</li>');
+        }
+        logsSection.show();
+        newLogContainer.show();
+        updateAddLogBtnState();
+      }).fail(err => {
+        console.error('Error loading logs:', err);
+        logsContainer.html('<li class="list-group-item text-danger">Error loading logs.</li>');
+      });
+    }
+
+    logTextarea.on('input', updateAddLogBtnState);
+
+    function updateAddLogBtnState() {
+      const courseId = courseSelect.val();
+      const logText = logTextarea.val().trim();
+      addLogBtn.prop('disabled', !(courseId && logText));
+    }
+
+    addLogBtn.on('click', function() {
+      const courseId = courseSelect.val();
+      const logText = logTextarea.val().trim();
+      if (!courseId || !logText) return;
+      $.post('/api/logs', { courseId, text: logText, uvuId: userNumericId }, () => {
+        logTextarea.val('');
+        fetchLogs(courseId);
+      }).fail(err => {
+        console.error('Failed to add log:', err);
+        alert('Error adding log');
+      });
+    });
+  </script>
+
+<script>
+  if (tenant === 'UVU') {
+    logoContainer.innerHTML = `<img src="https://www.cdnlogo.com/logos/u/35/utah-valley-university.svg" width="200" class="img-fluid" alt="UVU Logo"/>`;
+    document.body.style.color = 'darkgreen';
+  } else {
+    logoContainer.innerHTML = `<img src="https://i.pinimg.com/originals/7a/fd/0d/7afd0da75e5b7c4a56dea47ca0a6d98e.png" width="200" class="img-fluid" alt="UofU Logo"/>`;
+    document.body.style.color = 'darkred';
+  }
+</script>
+</body>
+</html>
