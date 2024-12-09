@@ -182,49 +182,96 @@ app.get('/uofu/student', ensureAuth, ensureTenant('uofu'), ensureRole('student')
 
 // Create user route
 app.post('/create-user', ensureAuth, async (req, res) => {
-    const { username, password, role, numericId } = req.body;
+    console.log('Received request to create user:', req.body);
+
+    const { username, password, role, numericId, courseIds } = req.body;
     const currentUser = req.session.user;
-    const allowed = canCreateRole(currentUser.role, role);
-    if (!allowed) return res.status(403).send('Forbidden');
 
-    if (role === 'student') {
-        if (!/^\d{8}$/.test(numericId)) {
-            return res.status(400).send('Invalid student ID. Must be 8 digits.');
+    try {
+        console.log('Raw courseIds:', courseIds);
+
+        // Validate role creation permissions
+        if (!canCreateRole(currentUser.role, role)) {
+            return res.status(403).send('Forbidden');
         }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ username });
+        if (existingUser) {
+            return res.status(400).send(`Username "${username}" is already taken.`);
+        }
+
+        // Create new user
+        const hash = await bcrypt.hash(password, 10);
+        const newUser = new User({
+            username,
+            password: hash,
+            role,
+            tenant: currentUser.tenant,
+            numericId: numericId || '00000000',
+        });
+        await newUser.save();
+
+        console.log('User created:', newUser);
+
+        // Process and sanitize courseIds
+        let parsedCourseIds = [];
+        if (Array.isArray(courseIds)) {
+            parsedCourseIds = courseIds.flatMap(id => {
+                try {
+                    const parsed = JSON.parse(id);
+                    if (Array.isArray(parsed)) return parsed;
+                    return [parsed];
+                } catch {
+                    return [id];
+                }
+            });
+        } else if (courseIds) {
+            try {
+                parsedCourseIds = Array.isArray(JSON.parse(courseIds)) ? JSON.parse(courseIds) : [JSON.parse(courseIds)];
+            } catch {
+                parsedCourseIds = [courseIds];
+            }
+        }
+
+        // Remove duplicates
+        parsedCourseIds = [...new Set(parsedCourseIds)];
+        console.log('Parsed courseIds:', parsedCourseIds);
+
+        // Assign courses
+        if (parsedCourseIds.length > 0) {
+            const roleKey = role === 'teacher' ? 'teachers' : role === 'TA' ? 'TAs' : 'students';
+            for (const courseId of parsedCourseIds) {
+                if (!mongoose.isValidObjectId(courseId)) {
+                    console.error('Invalid courseId:', courseId);
+                    return res.status(400).send(`Invalid courseId: ${courseId}`);
+                }
+                await Course.findByIdAndUpdate(courseId, {
+                    $addToSet: { [roleKey]: role === 'student' ? numericId : newUser._id },
+                });
+            }
+        }
+
+        console.log('Courses assigned successfully');
+        res.send('User created and assigned to courses successfully');
+    } catch (error) {
+        console.error('Error creating user:', error);
+        res.status(500).send('Internal server error');
     }
-
-    const hash = await bcrypt.hash(password, 10);
-    const newUser = new User({
-        username,
-        password: hash,
-        role,
-        tenant: currentUser.tenant,
-        numericId: numericId || '00000000'
-    });
-
-    await newUser.save();
-    res.send('User created successfully');
 });
 
 // Courses and logs
 app.get('/api/courses', ensureAuth, async (req, res) => {
-    const { tenant, role, _id, numericId } = req.session.user;
+    const { tenant } = req.session.user;
     try {
-        let query = { tenant };
-        if (role === 'student') {
-            query.students = numericId;
-        }
-        if (role === 'TA') query.TAs = _id;
-        if (role === 'teacher') query.teachers = _id;
-
-        const courses = await Course.find(query);
-        res.json(courses);
+      const courses = await Course.find({ tenant });
+      res.json(courses);
     } catch (error) {
-        console.error(error);
-        res.status(500).send('Error fetching courses');
+      console.error('Error fetching courses:', error);
+      res.status(500).send('Error fetching courses');
     }
-});
-
+  });
+  
 app.post('/api/courses', ensureAuth, async (req, res) => {
     const { tenant, role, _id } = req.session.user;
     const { display } = req.body;

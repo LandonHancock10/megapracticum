@@ -34,6 +34,12 @@
         </select>
       </div>
       <div class="mb-3">
+        <label class="form-label">Assign Courses</label>
+        <select name="courseIds" id="courseIds" class="form-select" multiple>
+          <!-- Options will be populated dynamically -->
+        </select>
+      </div>      
+      <div class="mb-3">
         <label class="form-label">Numeric ID (8-digit)</label>
         <input type="text" name="numericId" maxlength="8" class="form-control" required />
       </div>
@@ -192,47 +198,60 @@
       }
     });
 
-    logTextarea.on('input', updateAddLogBtnState);
-
-    addLogBtn.on('click', function () {
-      const courseId = courseSelect.val();
-      const userIdVal = userIdInput.val();
-      const logText = logTextarea.val().trim();
-      if (!courseId || userIdVal.length !== 8 || !logText) return;
-      $.post('/api/logs', { courseId, text: logText, uvuId: userIdVal }, () => {
-        logTextarea.val('');
-        tryFetchLogs();
-      }).fail(err => {
-        console.error('Failed to add log:', err);
-        alert('Error adding log');
-      });
+    // Populate courses into the courseIds dropdown
+    function populateCourseOptions() {
+  $.get('/api/courses', (courses) => {
+    const courseIds = $('#courseIds');
+    courseIds.empty();
+    courses.forEach((course) => {
+      courseIds.append(`<option value="${course._id}">${course.display}</option>`);
     });
+  }).fail((err) => {
+    console.error('Failed to load courses:', err);
+  });
+}
 
-    createUserForm.on('submit', function (e) {
-      e.preventDefault();
-      const formData = $(this).serialize();
-      $.post('/create-user', formData, (res) => {
+// On page load, populate courses
+populateCourseOptions();
+
+// Modify form submission to include selected courses
+// Ensure no duplicate event listeners
+createUserForm.off('submit').on('submit', function (e) {
+    e.preventDefault();
+
+    const formData = $(this).serializeArray();
+    let courseIds = $('#courseIds').val();
+
+    console.log('Raw courseIds from form:', courseIds);
+
+    // Ensure courseIds is an array of unique values
+    if (courseIds) {
+        courseIds = [...new Set(courseIds.flatMap(id => {
+            try {
+                return Array.isArray(JSON.parse(id)) ? JSON.parse(id) : [JSON.parse(id)];
+            } catch {
+                return [id];
+            }
+        }))];
+    }
+
+    console.log('Sanitized courseIds:', courseIds);
+
+    formData.push({ name: 'courseIds', value: JSON.stringify(courseIds) });
+
+    $.post('/create-user', formData, (res) => {
         alert(res);
         $(this)[0].reset();
-      }).fail(err => {
-        alert('Failed to create user: ' + err.responseText);
-      });
-    });
-
-    createCourseForm.on('submit', function (e) {
-      e.preventDefault();
-      const courseName = newCourseName.val().trim();
-      if (!courseName) return;
-      $.post('/api/courses', { display: courseName }, () => {
-        newCourseName.val('');
         loadCourses();
-      }).fail(err => {
-        console.error('Failed to save course:', err);
-        alert('Error adding course');
-      });
+    }).fail((err) => {
+        console.error('Error creating user:', err);
+        alert('Failed to create user: ' + (err.responseText || 'Unknown error'));
     });
+});
 
+    // Initial course load
     loadCourses();
+
   </script>
   <script>
     if (tenant === 'UVU') {

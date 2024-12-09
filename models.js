@@ -22,7 +22,7 @@ const courseSchema = new mongoose.Schema({
 const Course = mongoose.model('Course', courseSchema);
 
 // LOG MODEL
-// uvuId is now always a numeric ID string (for both tenants).
+// uvuId is always a numeric ID string (for both tenants).
 const logSchema = new mongoose.Schema({
     tenant: { type: String, required: true },
     courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', required: true },
